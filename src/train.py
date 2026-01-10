@@ -10,8 +10,9 @@ from torch.utils.data import TensorDataset, DataLoader
 from pathlib import Path
 
 from data_processing import load_processed_data
-from models import LSTMPredictor 
+from models import LSTMPredictor, TransformerPredictor
 from config import *
+from evaluate import evaluate_model
 
 def train_model(model, train_loader, criterion, optimizer, device, num_epochs):
     model.train()
@@ -38,7 +39,7 @@ def train_model(model, train_loader, criterion, optimizer, device, num_epochs):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', type=str, default='lstm', choices=['lstm', 'gru'])
+    parser.add_argument('--model', type=str, default='lstm', choices=['lstm', 'gru', 'transformer'])
     parser.add_argument('--epochs', type=int, default=30)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--lr', type=float, default=0.001)
@@ -54,6 +55,8 @@ def main():
     # Initialize model
     if args.model == 'lstm':
         model = LSTMPredictor(input_size, HIDDEN_SIZE, NUM_LAYERS, DROPOUT) 
+    elif args.model == 'transformer':
+        model = TransformerPredictor(input_size, D_MODEL, N_HEAD, NUM_LAYERS, DIM_FF, DROPOUT)
   
     model = model.to(device)
     
@@ -67,11 +70,18 @@ def main():
     
     model = train_model(model, train_loader, criterion, optimizer, device, args.epochs)
     
-    # Save model
-    save_path = PROJECT_ROOT / "experiments" / f"{args.model}_epochs{args.epochs}.pt"
-    save_path.parent.mkdir(exist_ok=True)
-    torch.save(model.state_dict(), save_path)
-    print(f"Model saved to {save_path}")
+    train_auroc, train_auprc, _, _ = evaluate_model(model, X_train, y_train, device)
+    test_auroc, test_auprc, y_pred, y_true = evaluate_model(model, X_test, y_test, device)
+    
+    print("="*50)
+    print(f"Training Set: AUROC={train_auroc:.4f}, AUPRC={train_auprc:.4f}")
+    print(f"Test Set: AUROC={test_auroc:.4f}, AUPRC={test_auprc:.4f}")
+
+    # # Save model
+    # save_path = PROJECT_ROOT / "experiments" / f"{args.model}_epochs{args.epochs}.pt"
+    # save_path.parent.mkdir(exist_ok=True)
+    # torch.save(model.state_dict(), save_path)
+    # print(f"Model saved to {save_path}")
 
 if __name__ == "__main__":
     main()

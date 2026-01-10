@@ -10,7 +10,7 @@ from sklearn.metrics import roc_auc_score, average_precision_score, roc_curve, p
 import matplotlib.pyplot as plt
 
 from data_processing import load_processed_data
-from models import LSTMPredictor
+from models import LSTMPredictor, TransformerPredictor
 from config import *
 
 def evaluate_model(model, X, y, device):
@@ -36,7 +36,10 @@ def main():
     
     # Load model
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    # TODO: model logic
     model = LSTMPredictor(X_train.shape[2], HIDDEN_SIZE, NUM_LAYERS, DROPOUT)
+
     model.load_state_dict(torch.load(args.model_path))
     model = model.to(device)
     

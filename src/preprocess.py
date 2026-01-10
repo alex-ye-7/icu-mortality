@@ -24,10 +24,10 @@ def main():
     
     # Process data
     print("Processing training data...")
-    X_train, y_train = build_dataset(train_files[:2000], train_dict, STATIC_VARS, TIME_SERIES_VARS)
+    X_train, y_train = build_dataset(train_files, train_dict, STATIC_VARS, TIME_SERIES_VARS)
     
     print("Processing test data...")
-    X_test, y_test = build_dataset(test_files[:2000], test_dict, STATIC_VARS, TIME_SERIES_VARS)
+    X_test, y_test = build_dataset(test_files, test_dict, STATIC_VARS, TIME_SERIES_VARS)
     
     # Save
     save_processed_data(X_train, X_test, y_train, y_test, DATA_PROCESSED)

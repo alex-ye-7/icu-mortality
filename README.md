@@ -10,9 +10,10 @@ Download PhysioNet2012 dataset from https://physionet.org/content/challenge-2012
 ### Preprocessing 
 
 Fixed 33 variables based on data explopration
-Aggregate time stamps by hour, studying the 12-36 hour period 
-Median and mode imputation for NA values not recorded within the study period 
--1 imputation for NA values not recorded at all for the patient across entire stay
+Aggregate time stamps by hour, studying the 13-36 hour period 
+Median and mode imputation for NA values not recorded within the study period (ie: Urine recorded at hour 13 only)
+-1 imputation for NA values not recorded at all for the patient across entire stay (ie: Glucose not recorded at all for patient)
+No standardization of values
 
 ### Models
 

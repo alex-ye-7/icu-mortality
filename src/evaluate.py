@@ -6,11 +6,12 @@ Usage: python src/evaluate.py --model_path experiments/lstm_epochs30.pt
 
 import argparse
 import torch
-from sklearn.metrics import roc_auc_score, average_precision_score, roc_curve, precision_recall_curve
+from sklearn.metrics import roc_auc_score, average_precision_score, roc_curve, precision_recall_curve, confusion_matrix
 import matplotlib.pyplot as plt
+import numpy as np
 
 from data_processing import load_processed_data
-from models import LSTMPredictor, TransformerPredictor
+from baseline_models import LSTMPredictor, TransformerPredictor
 from config import *
 
 def evaluate_model(model, X, y, device):
@@ -25,6 +26,22 @@ def evaluate_model(model, X, y, device):
     auprc = average_precision_score(y_true, y_pred)
     
     return auroc, auprc, y_pred, y_true
+
+def calc_youdens(y_true, y_pred):
+    tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+    sensitivity = tp / (tp + fn)
+    specificty = tn / (tn + fp)
+    return sensitivity + specificty - 1
+
+def find_optimal_youdens(y_true, y_pred): # y_pred is probabilities
+    apply_threshold = lambda x, y: [1 if elm > x else 0 for elm in x]
+    thresholds = np.linspace(0,1,101)
+    scores = []
+    for t in thresholds:
+        y_temp = apply_threshold(y_pred, t)
+        scores.append(calc_youdens(y_true, y_temp))
+    best_t = thresholds[np.argmax(scores)]
+    return best_t
 
 def main():
     parser = argparse.ArgumentParser()

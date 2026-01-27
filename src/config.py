@@ -4,7 +4,7 @@ from pathlib import Path
 # Paths
 PROJECT_ROOT = Path(__file__).parent.parent
 DATA_RAW = PROJECT_ROOT / "data" / "raw"
-DATA_PROCESSED = PROJECT_ROOT / "data" / "processed"
+DATA_PROCESSED = PROJECT_ROOT / "data" / "_processed"
 
 # Variables extracted from https://physionet.org/content/challenge-2012/1.0.0/
 # Then narrowed down to 33 relevent variables upon data exploration

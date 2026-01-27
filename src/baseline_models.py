@@ -1,6 +1,25 @@
 # Alexander Ye
+# Vanilla models
 
+import torch
 import torch.nn as nn
+
+class GRUPredictor(nn.Module):
+    def __init__(self, input_size, hidden_size=64, num_layers=2):
+        super(GRUPredictor, self).__init__()
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+
+        self.gru = nn.GRU(input_size, hidden_size, num_layers, batch_first=True)
+        self.fc = nn.Linear(hidden_size, 1)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(x.device)
+        out, hn = self.gru(x, h0)
+        out = self.fc(out[:, -1, :])
+        out = self.sigmoid(out)
+        return out
 
 # Simple LSTM Predictor
 class LSTMPredictor(nn.Module):
@@ -38,11 +57,10 @@ class LSTMPredictor(nn.Module):
         return out
 
 # Transformer Based Model 
-# Build the transformer from scratch?
 class TransformerPredictor(nn.Module):
     def __init__(self, input_size, d_model=64, nhead=4,
                  num_layers=2, dim_feedforward=128, dropout=0.1):
-        super().__init__()
+        super(TransformerPredictor, self).__init__()
 
         self.d_model = d_model
         self.projection = nn.Linear(input_size, d_model) # Input features to model dim
@@ -75,7 +93,6 @@ class TransformerPredictor(nn.Module):
         # First feature is 'Hour' (13-36)
         
         hours = x[:, :, 0:1] # first element of all time steps
-
         x_embed = self.projection(x)
         time_embed = self.time_embed(hours)
         x = x_embed + time_embed

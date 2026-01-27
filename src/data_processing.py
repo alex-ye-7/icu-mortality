@@ -1,5 +1,5 @@
 # Alexander Ye
-# Preprocessing logic
+# Preprocessing functions
 
 import pandas as pd
 import numpy as np
@@ -175,3 +175,115 @@ def load_processed_data(load_dir):
         torch.load(load_dir / "y_train.pt"),
         torch.load(load_dir / "y_test.pt")
     )
+
+def create_triplets(file_path, feature_to_id):
+    """
+    Create triplet representation directly from raw patient CSV file
+    
+    Params: file_path to csv, feature_to_id dictionary mapping features to ID
+    Returns: torch.Tensor of shape (num_observations, 3), recordID of type int
+    """
+    try:
+        df = pd.read_csv(file_path)
+    except EmptyDataError: # one of the files is empty for some reason
+        return torch.zeros((0, 3), dtype=torch.float32), 0
+    
+    patient_id = int(df['Value'][df['Parameter']=='RecordID'].iloc[0]) # To be used for matching to outcome
+
+    triplets = []
+    # Convert time to minutes 
+    df['Time_min'] = df['Time'].apply(lambda x: int(x[:2]) * 60 + int(x[3:]))
+    df = df.sort_values("Time_min")
+    
+    # Extract all observations in triplet format
+    for _, row in df.iterrows():
+        time_min = row['Time_min']
+        feature_name = row['Parameter']
+        value = row['Value']
+        
+        # Skip unknown parameters, na values, and -1's
+        if feature_name in feature_to_id and not pd.isna(value) and value>=0:
+            feature_id = feature_to_id[feature_name]
+            triplets.append([time_min, feature_id, float(value)])
+
+    return torch.tensor(triplets, dtype=torch.float32), patient_id
+
+
+def build_triplet_dataset(file_list, outcomes_dict, static_vars, time_series_vars):
+    """
+    Build dataset in triplet format directly from raw CSV files
+    
+    Params: 
+        file_list of patient paths
+        outcomes_dict mapping RecordID to 0 or 1
+        static_vars: List of static variable names
+        time_series_vars: List of time-series variable names
+    
+    Returns:
+        triplets_list: List of variable-length tensors, each shape (num_obs, 3)
+        y: Tensor of outcomes
+        feature_to_id: Mapping from feature name to feature ID
+        id_to_feature: Mapping from feature ID to feature name
+    """
+    all_features = static_vars + time_series_vars
+    feature_to_id = {name: idx for idx, name in enumerate(all_features)}
+    id_to_feature = {idx: name for name, idx in feature_to_id.items()}
+    
+    triplets_list = []
+    y_list = []
+    
+    for file_path in tqdm(file_list):
+        record_id = int(Path(file_path).stem)
+        
+        if record_id not in outcomes_dict:
+            continue
+
+        triplets = create_triplets(file_path, feature_to_id)
+
+        if len(triplets) > 0:
+            triplets_list.append(triplets)
+            y_list.append(outcomes_dict[record_id])
+    
+    y = torch.tensor(y_list, dtype=torch.float32)
+    
+    return triplets_list, y, feature_to_id, id_to_feature
+
+
+def save_triplet_data(triplets_list, y, feature_to_id, save_dir, split_name="train"):
+    """
+    Save triplet dataset to disk.
+    
+    Params:
+        triplets_list: List of variable-length tensors
+        y: Outcome labels tensor
+        feature_to_id: Feature mapping dictionary
+        save_dir: Directory to save files
+        split_name: 'train' or 'test'
+    """
+    save_dir = Path(save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Save triplets as list (preserves variable lengths)
+    torch.save(triplets_list, save_dir / f"triplets_{split_name}.pt")
+    # Save outcomes
+    torch.save(y, save_dir / f"y_{split_name}.pt")
+    # Save feature mapping
+    torch.save(feature_to_id, save_dir / f"feature_to_id_{split_name}.pt")
+    print(f"Saved {len(triplets_list)} patients from {split_name} triplet data to {save_dir}")
+
+def load_triplet_data(load_dir, split_name="train"):
+    """
+    Load triplet dataset from disk.
+    
+    Returns:
+        triplets_list: List of variable-length tensors
+        y: Outcome labels
+        feature_to_id: Feature mapping
+    """
+    load_dir = Path(load_dir)
+    
+    triplets_list = torch.load(load_dir / f"triplets_{split_name}.pt")
+    y = torch.load(load_dir / f"y_{split_name}.pt")
+    feature_to_id = torch.load(load_dir / f"feature_to_id_{split_name}.pt")
+    
+    return triplets_list, y, feature_to_id

@@ -3,14 +3,15 @@
 import torch
 import numpy as np
 import torch.nn as nn
+import torch.nn.functional as F
 
 class CVE(nn.Module):
-    def __init__(self, hidden_size):
+    def __init__(self, args):
         super().__init__()
-        int_dim = int(np.sqrt(hidden_size))
+        int_dim = int(np.sqrt(args.hid_dim))
         self.W1 = nn.Parameter(torch.empty(1, int_dim), requires_grad=True)
         self.b1 = nn.Parameter(torch.zeros(int_dim), requires_grad=True)
-        self.W2 = nn.Parameter(torch.empty(int_dim, hidden_size), requires_grad=True)
+        self.W2 = nn.Parameter(torch.empty(int_dim, args.hid_dim), requires_grad=True)
         nn.init.xavier_uniform_(self.W1)
         nn.init.xavier_uniform_(self.W2)
         self.activation = torch.tanh
@@ -22,10 +23,85 @@ class CVE(nn.Module):
         x = x @ self.W2
         return x
 
-# class Transformer(nn.Module)
+# Example
+# args = Namespace(
+#     num_layers=6,
+#     hid_dim=512,
+#     num_heads=8,
+#     dropout=0.1,
+#     attention_dropout=0.1
+# )
 
+class TransformerBlock(nn.Module):
+    def __init__(self,  d, num_heads, dff, dropout, attention_dropout):
+        super().__init__()
+        self.d = d
+        self.num_heads = num_heads
+        self.dff = dff
+        self.head_size = d // num_heads
+        self.attention_dropout = attention_dropout
+        self.dropout = dropout
+
+        # attention
+        self.query = nn.Linear(self.d, self.d, bias=False)
+        self.key = nn.Linear(self.d, self.d, bias=False)
+        self.value = nn.Linear(self.d, self.d, bias=False)
+        self.projection = nn.Linear(d, d, bias=False)
+
+        self.norm1 = nn.LayerNorm(self.d)
+        self.norm2 = nn.LayerNorm(self.d)
+        self.W1 = nn.Linear(self.d, self.dff, bias=True)
+        self.W2 = nn.Linear(self.dff, self.d, bias=True)
+
+    def forward(self, x, mask):
+        B, T, C = x.size() # bsz, max_len, d
+
+        # single layer handles all heads
+        q = self.query(x)
+        k = self.key(x)
+        v = self.value(x)
+
+        q = q.view(B, T, self.num_heads, self.head_size).transpose(1, 2)  # (B, h, T, dk)
+        k = k.view(B, T, self.num_heads, self.head_size).transpose(1, 2)  # (B, h, T, dk)
+        v = v.view(B, T, self.num_heads, self.head_size).transpose(1, 2)  # (B, h, T, dk)
+
+        A = q @ k.transpose(-2, -1)  # (B, h, T, T)
+        
+        # Apply mask
+        mask_2d = mask[:, :, None] * mask[:, None, :]  # (B, T, T)
+        mask_2d = (1 - mask_2d)[:, None, :, :] * torch.finfo(x.dtype).min  # (B, 1, T, T)
+        A = A + mask_2d
+
+        if self.training:
+            dropout_mask = (torch.rand_like(A) < self.attention_dropout).float() * torch.finfo(x.dtype).min
+            A = A + dropout_mask
+        
+        A = torch.softmax(A, dim=-1)  # (B, h, T, T)
+        
+        # Apply attention
+        out = A @ v  # (B, h, T, dk)
+        
+        # Reshape back
+        out = out.transpose(1, 2).contiguous()  # (B, T, h, dk)
+        out = out.view(B, T, self.d)  # (B, T, d)
+        
+        # Output projection
+        out = self.projection(out)
+        out = F.dropout(out, self.dropout, self.training)
+
+        x = self.norm1(out + x)
+
+        ffn_out = self.W1(x)
+        ffn_out = F.gelu(ffn_out)
+        ffn_out = self.W2(ffn_out)
+        ffn_out = F.dropout(ffn_out, self.dropout, self.training)
+        
+        x = self.norm2(ffn_out + x) 
+        
+        return x
+        
 class STraTS(nn.Module):
-    def __init__(self, num_features, d_model, hidden_size):
+    def __init__(self, args):
         super().__init__()
         # Time embed
         # Feature embed

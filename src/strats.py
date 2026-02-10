@@ -4,6 +4,7 @@ import torch
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
+from argparse import Namespace
 
 class CVE(nn.Module):
     def __init__(self, args):
@@ -29,8 +30,33 @@ class CVE(nn.Module):
 #     hid_dim=512,
 #     num_heads=8,
 #     dropout=0.1,
-#     attention_dropout=0.1
+#     attention_dropout=0.1,
+#     V=?!
 # )
+
+class Transformer(nn.Module):
+    def __init__(self, args):
+        super().__init__()
+        self.N = args.num_layers
+        self.d = args.hid_dim
+        self.dff = self.d * 2
+        self.attention_dropout = args.attention_dropout
+        self.dropout = args.dropout
+        self.h = args.num_heads
+        self.dk = self.d // self.h
+        self.all_head_size = self.dk * self.h
+
+        self.layers = nn.ModuleList([
+            TransformerBlock(self.d, self.h, self.dff, self.dropout, self.attention_dropout)
+            for _ in range(self.N)
+        ])
+
+    def forward(self, x, mask):
+        for layer in self.layers:
+            x = layer(x, mask)
+        return x
+
+        
 
 class TransformerBlock(nn.Module):
     def __init__(self,  d, num_heads, dff, dropout, attention_dropout):
@@ -102,10 +128,31 @@ class TransformerBlock(nn.Module):
         
 class STraTS(nn.Module):
     def __init__(self, args):
-        super().__init__()
-        # Time embed
-        # Feature embed
-        # Value embed
-        # Transformer
+        super().__init__(args)
+        self.time_embd = CVE(args)
+        self.value_embd = CVE(args)
+        self.var_embd = nn.Embedding(args.V, args.hid_dim)
+        self.transformer = Transformer(args)
+        # self.fusion_attn =
+        self.dropout = args.dropout
+        self.V = args.V
 
-        # Dropout
+    def forward(self, values, times, vars, obs_mask, demo):
+        bsz, max_obs = values.size()
+
+        demo_embd = self.demo_emb(demo)
+
+        time_embd = self.time_embd(times)
+        value_embd = self.value_embd(values)
+        vari_embd = self.var_embd(vars)
+        triplet_embd = time_embd+value_embd+vari_embd
+        triplet_embd = F.dropout(triplet_embd, self.dropout, self.training)
+        contextual_emb = self.transformer(triplet_embd, obs_mask) 
+
+        # fusion self attention?
+
+        ts_embd = (triplet_embd*attention_weights).sum(dim=1)
+        ts_demo_embd = torch.cat((ts_embd, demo_embd), dim=-1)
+
+        logits = self.binary_head(self.forecast_head(ts_demo_embd))[:,0]
+        return F.sigmoid(logits)

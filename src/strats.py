@@ -24,6 +24,26 @@ class CVE(nn.Module):
         x = x @ self.W2
         return x
 
+class FusionAttention(nn.Module):
+    def __init__(self, args):
+        super().__init__()
+        int_dim = args.hid_dim
+        self.W = nn.Parameter(torch.empty(int_dim, int_dim), requires_grad=True)
+        self.b = nn.Parameter(torch.zeros(int_dim), requires_grad=True)
+        self.u = nn.Parameter(torch.empty(int_dim, 1), requires_grad=True) # context
+        nn.init.xavier_uniform_(self.W)
+        nn.init.xavier_uniform_(self.u)
+        self.activation = torch.tanh
+
+    def forward(self, x, mask): 
+        # x is (bsz, max_len, hid_dim)
+        att = torch.matmul(x, self.W) + self.b[None,None,:] # (bsz, max_len, hid_dim)
+        att = self.activation(att)
+        att = torch.matmul(att, self.u)[:,:,0]# (bsz, max_len)
+        att = att + (1-mask) * torch.finfo(att.dtype).min # mask out 0s to very negative value
+        att = torch.softmax(att, dim=-1) # (bsz, max_len)
+        return att 
+
 # Example
 # args = Namespace(
 #     num_layers=6,
@@ -133,9 +153,12 @@ class STraTS(nn.Module):
         self.value_embd = CVE(args)
         self.var_embd = nn.Embedding(args.V, args.hid_dim)
         self.transformer = Transformer(args)
-        # self.fusion_attn =
+        self.fusion_attn = FusionAttention(args)
         self.dropout = args.dropout
         self.V = args.V
+        ts_demo_emb_size = args.hid_dim + args.D
+        self.binary_head = nn.Linear(ts_demo_emb_size, 1)
+        self.forecast_head = nn.Linear(ts_demo_emb_size, args.V)
 
     def forward(self, values, times, vars, obs_mask, demo):
         bsz, max_obs = values.size()
@@ -149,7 +172,7 @@ class STraTS(nn.Module):
         triplet_embd = F.dropout(triplet_embd, self.dropout, self.training)
         contextual_emb = self.transformer(triplet_embd, obs_mask) 
 
-        # fusion self attention?
+        attention_weights = self.fusion_attn(contextual_emb, obs_mask).unsqueeze(-1)
 
         ts_embd = (triplet_embd*attention_weights).sum(dim=1)
         ts_demo_embd = torch.cat((ts_embd, demo_embd), dim=-1)

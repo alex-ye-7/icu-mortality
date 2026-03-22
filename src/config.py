@@ -1,4 +1,6 @@
-# src/config.py
+# Alexander Ye
+# Configurations file
+
 from pathlib import Path
 
 # Paths
@@ -48,10 +50,22 @@ TIME_SERIES_VARS = [
     'WBC',         # White blood cell count (cells/nL)
 ]
 
+# Normalization bounds for demographic features
+DEMO_NORMALIZERS = {
+    'Age': (18, 89),           # Min, Max age in training data
+    'Gender': (0, 1),          # Binary: 0=F, 1=M
+    'Height': (140, 210),      # cm
+    'ICUType': (1, 4),         # Categorical: 1-4
+    'Weight': (30, 200),       # kg
+}
+
+# Demographic features to extract (exclude RecordID as it's an identifier)
+DEMO_FEATURES = ['Age', 'Gender', 'Height', 'ICUType', 'Weight']
+
 # Training parameters
 BATCH_SIZE = 32
 LEARNING_RATE = 0.001
-NUM_EPOCHS = 50
+NUM_EPOCHS = 10
 
 HIDDEN_SIZE = 64
 NUM_LAYERS = 2

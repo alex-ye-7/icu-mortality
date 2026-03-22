@@ -1,10 +1,10 @@
 # Alexander Ye 
+# STraTS model implementation
 
 import torch
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
-from argparse import Namespace
 
 class CVE(nn.Module):
     def __init__(self, args):
@@ -111,18 +111,19 @@ class TransformerBlock(nn.Module):
         k = k.view(B, T, self.num_heads, self.head_size).transpose(1, 2)  # (B, h, T, dk)
         v = v.view(B, T, self.num_heads, self.head_size).transpose(1, 2)  # (B, h, T, dk)
 
-        A = q @ k.transpose(-2, -1)  # (B, h, T, T)
+        A = q @ k.transpose(-2, -1) / (self.head_size ** 0.5)  # (B, h, T, T)
         
         # Apply mask
         mask_2d = mask[:, :, None] * mask[:, None, :]  # (B, T, T)
         mask_2d = (1 - mask_2d)[:, None, :, :] * torch.finfo(x.dtype).min  # (B, 1, T, T)
         A = A + mask_2d
 
-        if self.training:
-            dropout_mask = (torch.rand_like(A) < self.attention_dropout).float() * torch.finfo(x.dtype).min
-            A = A + dropout_mask
-        
         A = torch.softmax(A, dim=-1)  # (B, h, T, T)
+        A = F.dropout(A, self.attention_dropout, self.training)
+        # attention dropout
+        # if self.training:
+        #     dropout_mask = (torch.rand_like(A) < self.attention_dropout).float() * torch.finfo(x.dtype).min
+        #     A = A + dropout_mask
         
         # Apply attention
         out = A @ v  # (B, h, T, dk)
@@ -143,28 +144,25 @@ class TransformerBlock(nn.Module):
         ffn_out = F.dropout(ffn_out, self.dropout, self.training)
         
         x = self.norm2(ffn_out + x) 
-        
         return x
         
 class STraTS(nn.Module):
     def __init__(self, args):
-        super().__init__(args)
+        super().__init__()
         self.time_embd = CVE(args)
         self.value_embd = CVE(args)
         self.var_embd = nn.Embedding(args.V, args.hid_dim)
+        self.demo_emb = nn.Linear(args.D, args.hid_dim) 
         self.transformer = Transformer(args)
         self.fusion_attn = FusionAttention(args)
         self.dropout = args.dropout
         self.V = args.V
-        ts_demo_emb_size = args.hid_dim + args.D
+        ts_demo_emb_size = 2 * args.hid_dim  # Concatenated ts_embd + demo_embd
         self.binary_head = nn.Linear(ts_demo_emb_size, 1)
-        self.forecast_head = nn.Linear(ts_demo_emb_size, args.V)
 
     def forward(self, values, times, vars, obs_mask, demo):
-        bsz, max_obs = values.size()
 
         demo_embd = self.demo_emb(demo)
-
         time_embd = self.time_embd(times)
         value_embd = self.value_embd(values)
         vari_embd = self.var_embd(vars)
@@ -174,8 +172,8 @@ class STraTS(nn.Module):
 
         attention_weights = self.fusion_attn(contextual_emb, obs_mask).unsqueeze(-1)
 
-        ts_embd = (triplet_embd*attention_weights).sum(dim=1)
+        ts_embd = (contextual_emb*attention_weights).sum(dim=1)
         ts_demo_embd = torch.cat((ts_embd, demo_embd), dim=-1)
 
-        logits = self.binary_head(self.forecast_head(ts_demo_embd))[:,0]
-        return F.sigmoid(logits)
+        logits = self.binary_head(ts_demo_embd).squeeze(-1)
+        return torch.sigmoid(logits)

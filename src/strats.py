@@ -1,16 +1,18 @@
 # Alexander Ye 
+# STraTS model implementation
 
 import torch
 import numpy as np
 import torch.nn as nn
+import torch.nn.functional as F
 
 class CVE(nn.Module):
-    def __init__(self, hidden_size):
+    def __init__(self, args):
         super().__init__()
-        int_dim = int(np.sqrt(hidden_size))
+        int_dim = int(np.sqrt(args.hid_dim))
         self.W1 = nn.Parameter(torch.empty(1, int_dim), requires_grad=True)
         self.b1 = nn.Parameter(torch.zeros(int_dim), requires_grad=True)
-        self.W2 = nn.Parameter(torch.empty(int_dim, hidden_size), requires_grad=True)
+        self.W2 = nn.Parameter(torch.empty(int_dim, args.hid_dim), requires_grad=True)
         nn.init.xavier_uniform_(self.W1)
         nn.init.xavier_uniform_(self.W2)
         self.activation = torch.tanh
@@ -22,14 +24,156 @@ class CVE(nn.Module):
         x = x @ self.W2
         return x
 
-# class Transformer(nn.Module)
-
-class STraTS(nn.Module):
-    def __init__(self, num_features, d_model, hidden_size):
+class FusionAttention(nn.Module):
+    def __init__(self, args):
         super().__init__()
-        # Time embed
-        # Feature embed
-        # Value embed
-        # Transformer
+        int_dim = args.hid_dim
+        self.W = nn.Parameter(torch.empty(int_dim, int_dim), requires_grad=True)
+        self.b = nn.Parameter(torch.zeros(int_dim), requires_grad=True)
+        self.u = nn.Parameter(torch.empty(int_dim, 1), requires_grad=True) # context
+        nn.init.xavier_uniform_(self.W)
+        nn.init.xavier_uniform_(self.u)
+        self.activation = torch.tanh
 
-        # Dropout
+    def forward(self, x, mask): 
+        # x is (bsz, max_len, hid_dim)
+        att = torch.matmul(x, self.W) + self.b[None,None,:] # (bsz, max_len, hid_dim)
+        att = self.activation(att)
+        att = torch.matmul(att, self.u)[:,:,0]# (bsz, max_len)
+        att = att + (1-mask) * torch.finfo(att.dtype).min # mask out 0s to very negative value
+        att = torch.softmax(att, dim=-1) # (bsz, max_len)
+        return att 
+
+# Example
+# args = Namespace(
+#     num_layers=6,
+#     hid_dim=512,
+#     num_heads=8,
+#     dropout=0.1,
+#     attention_dropout=0.1,
+#     V=?!
+# )
+
+class Transformer(nn.Module):
+    def __init__(self, args):
+        super().__init__()
+        self.N = args.num_layers
+        self.d = args.hid_dim
+        self.dff = self.d * 2
+        self.attention_dropout = args.attention_dropout
+        self.dropout = args.dropout
+        self.h = args.num_heads
+        self.dk = self.d // self.h
+        self.all_head_size = self.dk * self.h
+
+        self.layers = nn.ModuleList([
+            TransformerBlock(self.d, self.h, self.dff, self.dropout, self.attention_dropout)
+            for _ in range(self.N)
+        ])
+
+    def forward(self, x, mask):
+        for layer in self.layers:
+            x = layer(x, mask)
+        return x
+
+        
+
+class TransformerBlock(nn.Module):
+    def __init__(self,  d, num_heads, dff, dropout, attention_dropout):
+        super().__init__()
+        self.d = d
+        self.num_heads = num_heads
+        self.dff = dff
+        self.head_size = d // num_heads
+        self.attention_dropout = attention_dropout
+        self.dropout = dropout
+
+        # attention
+        self.query = nn.Linear(self.d, self.d, bias=False)
+        self.key = nn.Linear(self.d, self.d, bias=False)
+        self.value = nn.Linear(self.d, self.d, bias=False)
+        self.projection = nn.Linear(d, d, bias=False)
+
+        self.norm1 = nn.LayerNorm(self.d)
+        self.norm2 = nn.LayerNorm(self.d)
+        self.W1 = nn.Linear(self.d, self.dff, bias=True)
+        self.W2 = nn.Linear(self.dff, self.d, bias=True)
+
+    def forward(self, x, mask):
+        B, T, C = x.size() # bsz, max_len, d
+
+        # single layer handles all heads
+        q = self.query(x)
+        k = self.key(x)
+        v = self.value(x)
+
+        q = q.view(B, T, self.num_heads, self.head_size).transpose(1, 2)  # (B, h, T, dk)
+        k = k.view(B, T, self.num_heads, self.head_size).transpose(1, 2)  # (B, h, T, dk)
+        v = v.view(B, T, self.num_heads, self.head_size).transpose(1, 2)  # (B, h, T, dk)
+
+        A = q @ k.transpose(-2, -1) / (self.head_size ** 0.5)  # (B, h, T, T)
+        
+        # Apply mask
+        mask_2d = mask[:, :, None] * mask[:, None, :]  # (B, T, T)
+        mask_2d = (1 - mask_2d)[:, None, :, :] * torch.finfo(x.dtype).min  # (B, 1, T, T)
+        A = A + mask_2d
+
+        A = torch.softmax(A, dim=-1)  # (B, h, T, T)
+        A = F.dropout(A, self.attention_dropout, self.training)
+        # attention dropout
+        # if self.training:
+        #     dropout_mask = (torch.rand_like(A) < self.attention_dropout).float() * torch.finfo(x.dtype).min
+        #     A = A + dropout_mask
+        
+        # Apply attention
+        out = A @ v  # (B, h, T, dk)
+        
+        # Reshape back
+        out = out.transpose(1, 2).contiguous()  # (B, T, h, dk)
+        out = out.view(B, T, self.d)  # (B, T, d)
+        
+        # Output projection
+        out = self.projection(out)
+        out = F.dropout(out, self.dropout, self.training)
+
+        x = self.norm1(out + x)
+
+        ffn_out = self.W1(x)
+        ffn_out = F.gelu(ffn_out)
+        ffn_out = self.W2(ffn_out)
+        ffn_out = F.dropout(ffn_out, self.dropout, self.training)
+        
+        x = self.norm2(ffn_out + x) 
+        return x
+        
+class STraTS(nn.Module):
+    def __init__(self, args):
+        super().__init__()
+        self.time_embd = CVE(args)
+        self.value_embd = CVE(args)
+        self.var_embd = nn.Embedding(args.V, args.hid_dim)
+        self.demo_emb = nn.Linear(args.D, args.hid_dim) 
+        self.transformer = Transformer(args)
+        self.fusion_attn = FusionAttention(args)
+        self.dropout = args.dropout
+        self.V = args.V
+        ts_demo_emb_size = 2 * args.hid_dim  # Concatenated ts_embd + demo_embd
+        self.binary_head = nn.Linear(ts_demo_emb_size, 1)
+
+    def forward(self, values, times, vars, obs_mask, demo):
+
+        demo_embd = self.demo_emb(demo)
+        time_embd = self.time_embd(times)
+        value_embd = self.value_embd(values)
+        vari_embd = self.var_embd(vars)
+        triplet_embd = time_embd+value_embd+vari_embd
+        triplet_embd = F.dropout(triplet_embd, self.dropout, self.training)
+        contextual_emb = self.transformer(triplet_embd, obs_mask) 
+
+        attention_weights = self.fusion_attn(contextual_emb, obs_mask).unsqueeze(-1)
+
+        ts_embd = (contextual_emb*attention_weights).sum(dim=1)
+        ts_demo_embd = torch.cat((ts_embd, demo_embd), dim=-1)
+
+        logits = self.binary_head(ts_demo_embd).squeeze(-1)
+        return torch.sigmoid(logits)

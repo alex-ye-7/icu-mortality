@@ -1,18 +1,9 @@
 # Alexander Ye
+# Functions for evaluation
 
-"""
-Usage: python src/evaluate.py --model_path experiments/lstm_epochs30.pt
-"""
-
-import argparse
 import torch
-from sklearn.metrics import roc_auc_score, average_precision_score, roc_curve, precision_recall_curve, confusion_matrix
-import matplotlib.pyplot as plt
 import numpy as np
-
-from data_processing import load_processed_data
-from baseline_models import LSTMPredictor, TransformerPredictor
-from config import *
+from sklearn.metrics import roc_auc_score, average_precision_score, auc, precision_recall_curve, confusion_matrix
 
 def evaluate_model(model, X, y, device):
     """Evaluate model and return metrics."""
@@ -21,11 +12,28 @@ def evaluate_model(model, X, y, device):
         X = X.to(device)
         y_pred = model(X).squeeze().cpu().numpy()
         y_true = y.numpy()
-    
     auroc = roc_auc_score(y_true, y_pred)
     auprc = average_precision_score(y_true, y_pred)
-    
     return auroc, auprc, y_pred, y_true
+
+def evaluate_strats(model, dataloader, device):
+    model.eval()
+    true, pred = [], []
+    with torch.no_grad():
+        for batch_test in dataloader:
+            batch_test = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch_test.items()}
+            probs = model(values=batch_test['values'], times=batch_test['times'],
+                vars=batch_test['varis'], obs_mask=batch_test['obs_mask'],
+                demo=batch_test['demo']
+            )
+            true.append(batch_test['labels'])
+            pred.append(probs)
+            
+        true, pred = torch.cat(true).cpu().numpy(), torch.cat(pred).cpu().numpy()
+        roc_auc = roc_auc_score(true, pred)
+        precision, recall, _ = precision_recall_curve(true, pred)
+        pr_auc = auc(recall, precision)
+        return roc_auc, pr_auc
 
 def calc_youdens(y_true, y_pred):
     tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
@@ -34,66 +42,11 @@ def calc_youdens(y_true, y_pred):
     return sensitivity + specificty - 1
 
 def find_optimal_youdens(y_true, y_pred): # y_pred is probabilities
-    apply_threshold = lambda x, y: [1 if elm > x else 0 for elm in x]
+    apply_threshold = lambda thres, preds: [1 if p > thres else 0 for p in preds]
     thresholds = np.linspace(0,1,101)
     scores = []
     for t in thresholds:
-        y_temp = apply_threshold(y_pred, t)
+        y_temp = apply_threshold(t, y_pred)
         scores.append(calc_youdens(y_true, y_temp))
     best_t = thresholds[np.argmax(scores)]
     return best_t
-
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--model_path', type=str, required=True)
-    args = parser.parse_args()
-    
-    # Load data
-    X_train, X_test, y_train, y_test = load_processed_data(DATA_PROCESSED)
-    
-    # Load model
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    
-    # TODO: model logic
-    model = LSTMPredictor(X_train.shape[2], HIDDEN_SIZE, NUM_LAYERS, DROPOUT)
-
-    model.load_state_dict(torch.load(args.model_path))
-    model = model.to(device)
-    
-    # Evaluate
-    train_auroc, train_auprc, _, _ = evaluate_model(model, X_train, y_train, device)
-    test_auroc, test_auprc, y_pred, y_true = evaluate_model(model, X_test, y_test, device)
-    
-    print("="*50)
-    print(f"Training Set: AUROC={train_auroc:.4f}, AUPRC={train_auprc:.4f}")
-    print(f"Test Set: AUROC={test_auroc:.4f}, AUPRC={test_auprc:.4f}")
-
-    # # Plot ROC and PR curves
-    # fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-
-    # # ROC Curve
-    # fpr, tpr, _ = roc_curve(y_true, y_pred)
-    # axes[0].plot(fpr, tpr, label=f'LSTM (AUROC = {test_auroc:.3f})')
-    # axes[0].plot([0, 1], [0, 1], 'k--', label='Random')
-    # axes[0].set_xlabel('False Positive Rate')
-    # axes[0].set_ylabel('True Positive Rate')
-    # axes[0].set_title('ROC Curve')
-    # axes[0].legend()
-    # axes[0].grid(True, alpha=0.3)
-
-    # # Precision-Recall Curve
-    # precision, recall, _ = precision_recall_curve(y_true, y_pred)
-    # axes[1].plot(recall, precision, label=f'LSTM (AUPRC = {test_auprc:.3f})')
-    # axes[1].axhline(y=y_true.mean(), color='k', linestyle='--',
-    #                 label=f'Baseline ({y_true.mean():.3f})')
-    # axes[1].set_xlabel('Recall')
-    # axes[1].set_ylabel('Precision')
-    # axes[1].set_title('Precision-Recall Curve')
-    # axes[1].legend()
-    # axes[1].grid(True, alpha=0.3)
-
-    # plt.tight_layout()
-    # plt.show()
-
-if __name__ == "__main__":
-    main()

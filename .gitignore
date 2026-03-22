@@ -1,5 +1,5 @@
-data/
-experiments/
+data/processed
+data/_processed
 src/__pycache__/
 src/utils/__pycache__/
 .DS_Store

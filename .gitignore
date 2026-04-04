@@ -1,5 +1,7 @@
 data/processed
 data/_processed
+data/raw/set-a
+data/raw/set-b
 src/__pycache__/
 src/utils/__pycache__/
 .DS_Store

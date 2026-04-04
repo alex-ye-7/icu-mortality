@@ -1,38 +1,146 @@
-# Predicting Mortality of ICU Patients: The PhysioNet/Computing in Cardiology Challenge 2012
-## Alexander Ye
+# Predicting Mortality of ICU Patients
 
-This repo contains implementations of deep learning models that ingests irregularly-sampled multivariate time-series data to predict mortality of ICU patients. 
+**Alexander Ye**
 
-### Dataset 
+Deep learning models for predicting ICU patient mortality from irregularly-sampled multivariate time-series data. The primary model implements the **STraTS** (Self-supervised Transformer for Time-Series) architecture, which uses a triplet representation technique to avoid time discretization and missing value imputation.
 
-Download PhysioNet2012 dataset from https://physionet.org/content/challenge-2012/1.0.0/.
+## Dataset
 
-Each patient has a CSV file that looks like:
+**Source:** [PhysioNet 2012 Computing in Cardiology Challenge](https://physionet.org/content/challenge-2012/1.0.0/)
 
-<img src="data_sample.png" alt="Alt text" width="150" height="250">
+Each patient has a CSV file of clinical observations recorded during their ICU stay:
 
-I treated set-a as the training set and set-b as the test set.
+<img src="images/data_sample.png" alt="Sample patient CSV" width="150" height="250">
 
-### Establishing Baseline
+- **Training set:** ~4000 patients (set-a)
+- **Test set:** ~4000 patients (set-b)
+- **Class distribution:** ~14% mortality (imbalanced)
+- **Study window:** Hours 13-37 of ICU stay -> come back to this
+- **Features:** 6 static variables (Age, Gender, Height, Weight, ICUType, RecordID) and 32 time-series variables (vitals, labs, blood gas, electrolytes, etc.)
 
-To establish a baseline for predictions, I pursued a standard hourly-aggregation and imputation approach. That is, fixing an hours by features matrix to capture the data. To preprocess,
+## Project Structure
 
-- Fixed 33 variables based on data explopration
-- Aggregate time stamps by hour, studying the 13-36 hour period 
-- Median and mode imputation for NA values not recorded within the study period (ie: Urine recorded at hour 13 only)
-- -1 imputation for NA values not recorded at all for the patient across entire stay (ie: Glucose not recorded at all for patient)
-- No standardization of values 
+```
+icu-mortality/
+├── src/
+│   ├── main.py                 # STraTS training pipeline
+│   ├── strats.py               # STraTS model (CVE, transformer, fusion attention)
+│   ├── dataset.py              # Custom dataset & variable-length dataloader
+│   ├── preprocess.py           # Data preprocessing entry point
+│   ├── evaluate.py             # AUROC, AUPRC, Youden's J
+│   ├── config.py               # Paths, hyperparameters, feature lists
+│   ├── baselines/
+│   │   ├── base_models.py      # GRU, LSTM, Transformer baselines
+│   │   └── base_train.py       # Baseline training script
+│   └── utils/
+│       ├── triplets_utils.py   # Triplet creation & normalization
+│       ├── base_utils.py       # Hourly aggregation & imputation
+│       ├── io.py               # Save/load tensor utilities
+│       └── load_data.py        # Raw data extraction
+├── data/
+│   ├── raw/                    # PhysioNet raw patient CSVs & outcomes
+│   └── _processed/             # Preprocessed .pt tensors
+├── notebooks/
+│   ├── data_exploration.ipynb
+│   └── inspection.ipynb
+└── images/
+```
 
-Model performance was evaluated using AUROC and AUPRC, which are threshold-independent metrics. Given the class imbalance (~14% mortality), AUPRC was emphasized as it is more informative than AUROC in imbalanced settings.
+## Approaches
 
-|  | GRU | LSTM | Transformer|
-|---   |---  |---   | ---  |
-|AUROC | 0.7750 | 0.7846 | 0.7915 |
-|AUPRC | 0.3840 | 0.4073 | 0.3779 |
+### 1. Baseline: Hourly Aggregation
 
-### The Triplet Representation
+Standard approach that discretizes time and imputes missing values:
 
-The triplet representation inspired from STraTS and TransEHR eliminates the need for time discretization and missing value imputation. The observation triplet is defined as the triple (t, f, v) where t is the time, f is feature or variable of interest, and v is the value of the observation. 
+- Aggregate observations by hour into a fixed (24, 33) matrix per patient
+- Median imputation for variables recorded at least once; -1 for never-recorded variables
+- No feature standardization
 
-- Feature embeddings are obtained from a simple lookup table similar to word embeddings. 
-- Values and times were embedded using continous value embedding technique using one-to-many Feed-Forward Network (FFN) with learnable parameters. The FFNs have one input neuron and $d$ output neurons and a single hidden layer with $\sqrt{d}$ neurons and $\tanh(.)$ activation. (Can also experiment with sinusoidal encodings to embed time)
+**Baseline Results:**
+
+|  | GRU | LSTM | Transformer |
+|---|---|---|---|
+| AUROC | 0.7750 | 0.7846 | 0.7915 |
+| AUPRC | 0.3840 | 0.4073 | 0.3779 |
+
+### 2. STraTS: Triplet Representation (Primary)
+
+Inspired by [STraTS](https://arxiv.org/abs/2107.14293) and TransEHR, this approach represents each clinical observation as a triplet **(t, f, v)** — time, feature ID, and value — eliminating the need for time discretization and imputation.
+
+**Architecture:**
+
+```
+Triplets (time, feature_id, value)
+    │
+    ├── Time  → CVE (continuous value embedding, 2-layer FFN with tanh)
+    ├── Value → CVE
+    └── Feature → Learned embedding lookup
+    │
+    ▼ (sum)
+Triplet Embeddings → Transformer Encoder (multi-head self-attention, masked)
+    │
+    ▼
+Fusion Attention (weighted aggregation over time steps)
+    │
+    ├── + Demographics (linear projection of normalized static features)
+    │
+    ▼
+Classification Head → Mortality Probability
+```
+
+**Key design choices:**
+- **Continuous Value Embedding (CVE):** One-to-many FFN with 1 input neuron, $\sqrt{d}$ hidden neurons with $\tanh$ activation, and $d$ output neurons — embeds scalar time and value into dense vectors
+- **Fusion attention:** Custom attention layer that computes a weighted sum over transformer outputs, handling variable-length sequences via masking
+- **Z-score normalization:** Per-feature normalization computed on training set — this proved critical for model convergence
+
+**Current Results:**
+
+| | STraTS |
+|---|---|
+| AUROC | 0.7726 |
+| AUPRC | 0.3889 |
+
+## Setup
+
+### Dependencies
+
+- Python 3.12+
+- PyTorch
+- pandas, numpy
+- scikit-learn
+- tqdm
+
+### Data Preparation
+
+1. Download the [PhysioNet 2012 dataset](https://physionet.org/content/challenge-2012/1.0.0/) and place `set-a/`, `set-b/`, `Outcomes-a.txt`, and `Outcomes-b.txt` in `data/raw/`.
+
+2. Run preprocessing:
+   ```bash
+   python src/preprocess.py
+   ```
+   This creates triplet tensors, labels, feature mappings, and normalization statistics in `data/_processed/`.
+
+### Training
+
+**STraTS model:**
+```bash
+python src/main.py --hidden_dim 64 --num_layers 2 --num_heads 4 --batch_size 32 --lr 0.001 --epochs 10
+```
+
+**Baseline models:**
+```bash
+python src/baselines/base_train.py
+```
+
+## Evaluation
+
+Models are evaluated with threshold-independent metrics:
+- **AUROC** — area under the ROC curve
+- **AUPRC** — area under the precision-recall curve (emphasized given ~14% mortality rate)
+- **Youden's J** — sensitivity + specificity - 1, used to find the optimal classification threshold
+
+## Lessons
+
+- **Z-score normalization is essential.** Without per-feature normalization, the STraTS model fails to converge. Clinical variables span vastly different scales (e.g., heart rate ~60-100 vs. pH ~7.35-7.45).
+- **Triplet representation handles irregular sampling naturally.** No information is lost to hourly binning, and no assumptions are made about missing data.
+- **AUPRC is more informative than AUROC** for imbalanced clinical datasets — a model predicting "alive" for everyone achieves ~0.86 accuracy but is clinically useless.

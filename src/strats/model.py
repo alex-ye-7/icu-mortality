@@ -177,3 +177,4 @@ class STraTS(nn.Module):
 
         logits = self.binary_head(ts_demo_embd).squeeze(-1)
         return torch.sigmoid(logits)
+    

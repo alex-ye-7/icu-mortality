@@ -6,7 +6,8 @@ from pathlib import Path
 # Paths
 PROJECT_ROOT = Path(__file__).parent.parent
 DATA_RAW = PROJECT_ROOT / "data" / "raw"
-DATA_PROCESSED = PROJECT_ROOT / "data" / "_processed"
+DATA_BASELINE = PROJECT_ROOT / "data" / "baseline"
+DATA_TRIPLET = PROJECT_ROOT / "data" / "triplet"
 
 # Variables extracted from https://physionet.org/content/challenge-2012/1.0.0/
 # Then narrowed down to 33 relevent variables upon data exploration
@@ -50,6 +51,7 @@ TIME_SERIES_VARS = [
     'WBC',         # White blood cell count (cells/nL)
 ]
 
+# TODO: maybe shouldn't hardcode
 # Normalization bounds for demographic features
 DEMO_NORMALIZERS = {
     'Age': (18, 89),           # Min, Max age in training data
@@ -59,7 +61,7 @@ DEMO_NORMALIZERS = {
     'Weight': (30, 200),       # kg
 }
 
-# Demographic features to extract (exclude RecordID as it's an identifier)
+# Demographic features to extract (exclude RecordID)
 DEMO_FEATURES = ['Age', 'Gender', 'Height', 'ICUType', 'Weight']
 
 # Training parameters
@@ -74,5 +76,8 @@ D_MODEL = 64
 N_HEAD = 4
 DIM_FF = 128
 
-# Study parameters
-STUDY_HOURS = (13, 37)
+# Study parameters (first 36 hours)
+STUDY_HOURS = (1, 36)
+
+# Scale up
+N_EXAMPLE = 800

@@ -1,16 +1,36 @@
 # Alexander Ye
-# Run training and eval here
+# Training and eval for STraTS
 
+import copy
 import random
 import argparse
 import numpy as np
 import torch
 import torch.optim as optim
 from tqdm import tqdm
-from strats import STraTS
-from dataset import Dataset, DataLoader
+from triplet.strats import STraTS
+from triplet.dataset import Dataset, DataLoader
 from config import *
-from evaluate import evaluate_strats
+from shared.evaluate import evaluate_strats
+
+def evaluate_strats(model, dataloader, device):
+    model.eval()
+    true, pred = [], []
+    with torch.no_grad():
+        for batch_test in dataloader:
+            batch_test = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch_test.items()}
+            probs = model(values=batch_test['values'], times=batch_test['times'],
+                vars=batch_test['varis'], obs_mask=batch_test['obs_mask'],
+                demo=batch_test['demo']
+            )
+            true.append(batch_test['labels'])
+            pred.append(probs)
+            
+        true, pred = torch.cat(true).cpu().numpy(), torch.cat(pred).cpu().numpy()
+        roc_auc = roc_auc_score(true, pred)
+        precision, recall, _ = precision_recall_curve(true, pred)
+        pr_auc = auc(recall, precision)
+        return roc_auc, pr_auc
 
 def parse_args() -> argparse.Namespace:
     """Function to parse arguments."""
@@ -36,15 +56,16 @@ if __name__ == "__main__":
     torch.manual_seed(42)
     args = parse_args()
 
-    # Load datasets
-    train_dataset = Dataset(args, split='train')
-    test_dataset = Dataset(args, split='test')
-
-    # Split training into train/val
-    indices = np.arange(len(train_dataset))
+    # Split indices first (for normalization)
+    y_train = torch.load(DATA_PROCESSED / 'y_train.pt', weights_only=True)
+    indices = np.arange(len(y_train))
     np.random.shuffle(indices)
     split_idx = int(len(indices) * (1 - args.val_split))
     train_indices, val_indices = indices[:split_idx], indices[split_idx:]
+
+    # Load datasets (train stats computed from train_indices only)
+    train_dataset = Dataset(split='train', stat_indices=train_indices)
+    test_dataset = Dataset(split='test')
     print(f"Train: {len(train_indices)}, Val: {len(val_indices)}, Test: {len(test_dataset)}")
 
     # Create dataloaders
@@ -62,6 +83,10 @@ if __name__ == "__main__":
     criterion = torch.nn.BCELoss()
 
     # Training loop
+    best_val_auroc = 0.0
+    epochs_without_improvement = 0
+    best_state = None
+
     for epoch in range(args.epochs):
         model.train()
         total_loss = 0
@@ -83,7 +108,21 @@ if __name__ == "__main__":
         # Validation
         val_auroc, val_auprc = evaluate_strats(model, val_loader, device=device)
         print(f"Epoch {epoch+1} - Loss: {avg_loss:.4f} | Val AUROC: {val_auroc:.4f} | Val AUPRC: {val_auprc:.4f}")
- 
+
+        if val_auroc > best_val_auroc:
+            best_val_auroc = val_auroc
+            epochs_without_improvement = 0
+            best_state = copy.deepcopy(model.state_dict())
+        else:
+            epochs_without_improvement += 1
+            if epochs_without_improvement >= args.patience:
+                print(f"Early stopping at Epoch {epoch+1} (no improvement for {args.patience} epochs)")
+                break
+
+    # Restore best model before test evaluation
+    if best_state is not None:
+        model.load_state_dict(best_state)
+
     roc_auc, pr_auc = evaluate_strats(model, test_loader, device=device)
     print(f"Test set AUROC: {roc_auc:.4f}")
     print(f"Test set AUPRC: {pr_auc:.4f}")

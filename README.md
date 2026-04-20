@@ -15,10 +15,10 @@ Each patient has a CSV file of clinical observations recorded during their ICU s
 - **Training set:** ~4000 patients (set-a)
 - **Test set:** ~4000 patients (set-b)
 - **Class distribution:** ~14% mortality (imbalanced)
-- **Study window:** Hours 13-37 of ICU stay -> come back to this
+- **Study window:** Hours 1-36 of ICU stay, predict at hour 48
 - **Features:** 6 static variables (Age, Gender, Height, Weight, ICUType, RecordID) and 32 time-series variables (vitals, labs, blood gas, electrolytes, etc.)
 
-## Project Structure
+## Project Structure (Redo)
 
 ```
 icu-mortality/
@@ -52,16 +52,18 @@ icu-mortality/
 
 Standard approach that discretizes time and imputes missing values:
 
-- Aggregate observations by hour into a fixed (24, 33) matrix per patient
+- Aggregate observations by hour into a fixed (36, 33) matrix per patient
 - Median imputation for variables recorded at least once; -1 for never-recorded variables
 - No feature standardization
+
+The training set was subsequently broken down into 85% train and 15% validation. 
 
 **Baseline Results:**
 
 |  | GRU | LSTM | Transformer |
 |---|---|---|---|
-| AUROC | 0.7750 | 0.7846 | 0.7915 |
-| AUPRC | 0.3840 | 0.4073 | 0.3779 |
+| AUROC | 0.7750 | 0.7977 | 0.7918 |
+| AUPRC | 0.3840 | 0.4117 | 0.3913 |
 
 ### 2. STraTS: Triplet Representation (Primary)
 
@@ -94,6 +96,7 @@ Classification Head → Mortality Probability
 - **Z-score normalization:** Per-feature normalization computed on training set — this proved critical for model convergence
 
 **Current Results:**
+With just a 1/5th of the training data:
 
 | | STraTS |
 |---|---|

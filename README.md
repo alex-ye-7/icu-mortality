@@ -18,32 +18,32 @@ Each patient has a CSV file of clinical observations recorded during their ICU s
 - **Study window:** Hours 1-36 of ICU stay, predict at hour 48
 - **Features:** 6 static variables (Age, Gender, Height, Weight, ICUType, RecordID) and 32 time-series variables (vitals, labs, blood gas, electrolytes, etc.)
 
-## Project Structure (Redo)
+## Project Structure
 
 ```
 icu-mortality/
 ├── src/
-│   ├── main.py                 # STraTS training pipeline
-│   ├── strats.py               # STraTS model (CVE, transformer, fusion attention)
-│   ├── dataset.py              # Custom dataset & variable-length dataloader
-│   ├── preprocess.py           # Data preprocessing entry point
-│   ├── evaluate.py             # AUROC, AUPRC, Youden's J
-│   ├── config.py               # Paths, hyperparameters, feature lists
-│   ├── baselines/
-│   │   ├── base_models.py      # GRU, LSTM, Transformer baselines
-│   │   └── base_train.py       # Baseline training script
-│   └── utils/
-│       ├── triplets_utils.py   # Triplet creation & normalization
-│       ├── base_utils.py       # Hourly aggregation & imputation
-│       ├── io.py               # Save/load tensor utilities
-│       └── load_data.py        # Raw data extraction
+|   ├── config.py               # Configurations 
+│   ├── common/
+│   │   ├── io.py               # Shared I/O functions
+│   │   └── metrics.py          # Common metrics for evaluation
+│   ├── baseline/
+│   │   ├── train.py            # Main training and evaluation loops
+│   │   ├── models.py           # GRU, LSTM, Transformer baselines
+│   │   ├── utils.py            # Helper functions for baesline models
+│   │   └── preprocess.py       # One time data preprocessing
+│   └── strats/
+│       ├── train.py            # Main training and evaluation loops
+│       ├── dataset.py          # Custom triplet dataset/dataloader
+│       ├── model.py            # STraTS model implementation
+│       └── utils.py            # Triplet preprocessing functions
+│       └── preprocess.py       # One time data preprocessing
 ├── data/
 │   ├── raw/                    # PhysioNet raw patient CSVs & outcomes
-│   └── _processed/             # Preprocessed .pt tensors
-├── notebooks/
-│   ├── data_exploration.ipynb
-│   └── inspection.ipynb
-└── images/
+│   ├── baseline/               # Preprocessed .pt tensors (standard imputation)
+|   └── triplet/                # Preprocessed .pt tensors (triplet form)
+|
+└── images/                     # For README
 ```
 
 ## Approaches
@@ -65,7 +65,8 @@ The training set was subsequently broken down into 85% train and 15% validation.
 | AUROC | 0.7750 | 0.7977 | 0.7918 |
 | AUPRC | 0.3840 | 0.4117 | 0.3913 |
 
-### 2. STraTS: Triplet Representation (Primary)
+
+### 2. STraTS: Triplet Representation 
 
 Inspired by [STraTS](https://arxiv.org/abs/2107.14293) and TransEHR, this approach represents each clinical observation as a triplet **(t, f, v)** — time, feature ID, and value — eliminating the need for time discretization and imputation.
 
@@ -103,9 +104,8 @@ With just a 1/5th of the training data:
 | AUROC | 0.7726 |
 | AUPRC | 0.3889 |
 
-## Setup
 
-### Dependencies
+### Project Dependencies
 
 - Python 3.12+
 - PyTorch
@@ -132,7 +132,7 @@ python src/main.py --hidden_dim 64 --num_layers 2 --num_heads 4 --batch_size 32 
 
 **Baseline models:**
 ```bash
-python src/baselines/base_train.py
+python -m src/baseline/train.py --model lstm --epochs 50
 ```
 
 ## Evaluation

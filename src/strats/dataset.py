@@ -4,31 +4,30 @@
 import torch
 import numpy as np
 from pathlib import Path
-from utils.io import *
-from utils.triplets_utils import *
+from triplet.utils.io import *
+from triplet.utils.triplets_utils import *
 
 class Dataset:
-    def __init__(self, args, split='train') -> None:
+    def __init__(self, split='train', stat_indices=None) -> None:
         data_dir = Path(__file__).parent.parent / 'data' / '_processed'
         triplets_list, y, feature_to_id = load_triplet_data(str(data_dir), split_name=split)
 
-        # Z-score normalize values
-        # Compute stats on train, reuse for test
+        # Extract demographics -> make this better
+        self.demo = normalize_demographics(triplets_list, feature_to_id)
+
+        # Z-score normalize time-series values
+        # Compute stats on train subset only, reuse for test
         if split == 'train':
-            stats = compute_value_stats(triplets_list)
+            stat_subset = [triplets_list[i] for i in stat_indices] if stat_indices is not None else triplets_list
+            stats = compute_value_stats(stat_subset)
             save_value_stats(stats, str(data_dir))
         else:
             stats = load_value_stats(str(data_dir))
         normalize_triplet_values(triplets_list, stats)
 
         # Convert triplets to separate arrays of times, feature IDs, and values
-        self.values = []
-        self.times = []
-        self.varis = []
+        self.times, self.values, self.varis  = [], [], []
         self.y = y.numpy()
-        
-        # Extract and normalize demographics from triplet data
-        self.demo = normalize_demographics(triplets_list, feature_to_id)
         
         for triplet in triplets_list:
             if len(triplet) > 0:

@@ -1,9 +1,11 @@
 # Alexander Ye
+# Baseline functions for reading patient files for imputation + fixed-length sequencing
 
 import torch
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
+from pathlib import Path
 from pandas.errors import EmptyDataError
 from config import STUDY_HOURS
 
@@ -13,17 +15,15 @@ def parse_time_to_hours(time_str):
   hours = int(split[0])
   return hours
 
+
 def read_patient_file(file_path, static_vars, time_series_vars):
   ''' Read single patient file and return DataFrame with one row per hour '''
   try:
-    df = pd.read_csv(file_path) # Read the file
-
+    df = pd.read_csv(file_path)
     df['Hour'] = df['Time'].apply(parse_time_to_hours) # Convert time string to hourly
-
     all_hours = sorted(df['Hour'].unique()) # All unique hours of data
-    # study_hours = np.arange(13,37)
-    rows = [] # One row for every hour
-
+    rows = [] 
+    
     # Extract static variables once
     static_data = {}
     for var in static_vars:
@@ -65,13 +65,9 @@ def read_patient_file(file_path, static_vars, time_series_vars):
     print(f"Error: No columns to parse from file {file_path}. Returning empty Dataframe")
     return pd.DataFrame(columns=["RecordID"]), 0
   
-def impute(input_df):
-  """
-  Perform median/mode imputation for non observed hours 
 
-  Params: Loaded in Dataframe from read_patient_file
-  Returns: Imputed Dataframe
-  """
+def impute(input_df):
+  """Perform median/mode imputation for non observed hours """
   imputed_df = input_df.copy()
   categorical_cols = ['MechVent']
   continuous_cols = [
@@ -97,11 +93,9 @@ def impute(input_df):
 
   return imputed_df
 
+
 def create_patient_sequence(input_df):
-  '''
-  Params: Imputed DataFrame from impute function
-  Returns: A list of lists for each patient  
-  '''
+  """Create fixed-length sequence from imputed DataFrame"""
   input_df = input_df.sort_values("Hour")
   study_hours = list(range(STUDY_HOURS[0], STUDY_HOURS[1]))
   # Reindex
@@ -119,10 +113,9 @@ def create_patient_sequence(input_df):
 
   return df_full[feature_cols].to_numpy(dtype=np.float32)
 
+
 def build_dataset(file_list, outcomes_dict, static_vars, time_series_vars):
-    """
-    Build X and y tensors from list of files
-    """
+    """ Build X and y tensors from list of files """
     X, y = [], []
     for file_path in tqdm(file_list):
         patient_df, record_id = read_patient_file(file_path, static_vars, time_series_vars)
@@ -135,3 +128,26 @@ def build_dataset(file_list, outcomes_dict, static_vars, time_series_vars):
         y.append(outcomes_dict[record_id])
     
     return torch.stack(X), torch.tensor(y, dtype=torch.float32)
+
+
+def save_processed_data(X_train, X_test, y_train, y_test, save_dir):
+    """ Save processed tensors to disk """
+    save_dir = Path(save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
+    
+    torch.save(X_train, save_dir / "X_train.pt")
+    torch.save(X_test, save_dir / "X_test.pt")
+    torch.save(y_train, save_dir / "y_train.pt")
+    torch.save(y_test, save_dir / "y_test.pt")
+    print(f"Saved processed data to {save_dir}")
+
+
+def load_processed_data(load_dir):
+    """ Load processed tensors from disk """
+    load_dir = Path(load_dir)
+    return (
+        torch.load(load_dir / "X_train.pt"),
+        torch.load(load_dir / "X_test.pt"),
+        torch.load(load_dir / "y_train.pt"),
+        torch.load(load_dir / "y_test.pt")
+    )

@@ -97,12 +97,12 @@ Classification Head → Mortality Probability
 - **Z-score normalization:** Per-feature normalization computed on training set — this proved critical for model convergence
 
 **Current Results:**
-With just a 1/5th of the training data:
+On the test set
 
 | | STraTS |
 |---|---|
-| AUROC | 0.7726 |
-| AUPRC | 0.3889 |
+| AUROC | 0.8394 |
+| AUPRC | 0.4912 |
 
 
 ### Project Dependencies
@@ -130,9 +130,9 @@ With just a 1/5th of the training data:
 python src/main.py --hidden_dim 64 --num_layers 2 --num_heads 4 --batch_size 32 --lr 0.001 --epochs 10
 ```
 
-**Baseline models:**
+**Baseline models:** 
 ```bash
-python -m src/baseline/train.py --model lstm --epochs 50
+python -m baseline.train --model lstm --epochs 50
 ```
 
 ## Evaluation
@@ -140,10 +140,8 @@ python -m src/baseline/train.py --model lstm --epochs 50
 Models are evaluated with threshold-independent metrics:
 - **AUROC** — area under the ROC curve
 - **AUPRC** — area under the precision-recall curve (emphasized given ~14% mortality rate)
-- **Youden's J** — sensitivity + specificity - 1, used to find the optimal classification threshold
 
 ## Lessons
 
 - **Z-score normalization is essential.** Without per-feature normalization, the STraTS model fails to converge. Clinical variables span vastly different scales (e.g., heart rate ~60-100 vs. pH ~7.35-7.45).
-- **Triplet representation handles irregular sampling naturally.** No information is lost to hourly binning, and no assumptions are made about missing data.
 - **AUPRC is more informative than AUROC** for imbalanced clinical datasets — a model predicting "alive" for everyone achieves ~0.86 accuracy but is clinically useless.

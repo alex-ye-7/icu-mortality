@@ -9,63 +9,41 @@ from pathlib import Path
 from pandas.errors import EmptyDataError
 from config import STUDY_HOURS
 
-def parse_time_to_hours(time_str):
-  """Convert time string to integer hour"""
-  split = time_str.split(':')
-  hours = int(split[0])
-  return hours
-
 
 def read_patient_file(file_path, static_vars, time_series_vars):
   ''' Read single patient file and return DataFrame with one row per hour '''
   try:
     df = pd.read_csv(file_path)
-    df['Hour'] = df['Time'].apply(parse_time_to_hours) # Convert time string to hourly
-    all_hours = sorted(df['Hour'].unique()) # All unique hours of data
-    rows = [] 
-    
-    # Extract static variables once
-    static_data = {}
-    for var in static_vars:
-      if var in df['Parameter'].values:
-        static_data[var] = df[df['Parameter'] == var]['Value'].iloc[0]
-      else:
-        static_data[var] = np.nan
-
-    for hour in all_hours:
-      row = {'Hour': hour }
-      hour_data = df[df['Hour'] == hour] # Select measurements within this hour
-
-      # Add static variables (same for every hour)
-      for var in static_vars:
-        row[var] = static_data.get(var, np.nan)
-      # Except change if weight changes
-      if hour_data[hour_data['Parameter'] == 'Weight']['Value'].any():
-        row['Weight'] = hour_data[hour_data['Parameter'] == 'Weight']['Value'].mean()
-
-      # For time-varying variabels
-      for var in time_series_vars:
-        var_measurements = hour_data[hour_data['Parameter'] == var]['Value']
-        if len(var_measurements) > 0:
-          row[var] = var_measurements.mean() # mean if there's multiple
-        else:
-          row[var] = np.nan
-
-      rows.append(row)
-
-    patient_df = pd.DataFrame(rows)
-
-    # Turn categorical variables into ints
-    for var in ['RecordID', 'Age', 'Gender', 'ICUType']:
-      patient_df[var] = patient_df[var].astype('Int64')
-
-    patient_id = patient_df['RecordID'].iloc[0] # To be used for matching to outcome
-    return patient_df, patient_id
-  except EmptyDataError: # ran into empty file in the dataset
+  except EmptyDataError: 
     print(f"Error: No columns to parse from file {file_path}. Returning empty Dataframe")
     return pd.DataFrame(columns=["RecordID"]), 0
-  
 
+  df['Hour'] = df['Time'].str.split(':').str[0].astype(int) # Vectorized hour conversion
+
+  # Extract static variables once (first occurance)
+  static_lookup = df.drop_duplicates('Parameter').set_index('Parameter')['Value']
+  static_data = {v: static_lookup.get(v, np.nan) for v in static_vars}
+  record_id = int(static_data.get('RecordID', 0))
+
+  # Pivot time-series: one row per hour, one column per parameter
+  pivot = (df.groupby(['Hour', 'Parameter'])['Value']
+            .mean()
+            .unstack('Parameter'))
+  pivot = pivot.reindex(columns=time_series_vars) # Create space for missing 
+
+  for var in static_vars:
+    pivot[var] = static_data[var] # Broadcast static data
+  
+  if 'Weight' in pivot.columns and 'Weight' in static_data: # Weight change may or may not be recorded 
+    pivot['Weight'] = pivot['Weight'].fillna(static_data['Weight'])
+
+  patient_df = pivot.reset_index() # Turn hour index into its own column
+
+  for var in ['RecordID', 'Age', 'Gender', 'ICUType']:
+    patient_df[var] = patient_df[var].astype(int) # Turn categorical variables into ints
+
+  return patient_df, record_id
+  
 def impute(input_df):
   """Perform median/mode imputation for non observed hours """
   imputed_df = input_df.copy()
@@ -107,10 +85,7 @@ def create_patient_sequence(input_df):
       .reset_index()
   )
   df_full["Hour"] = df_full["Hour"].astype(float)
-
-  # Drop non-feature identifiers
-  feature_cols = [col for col in df_full.columns if col != "RecordID"]
-
+  feature_cols = [col for col in df_full.columns if col != "RecordID"]  # Drop non-feature identifiers
   return df_full[feature_cols].to_numpy(dtype=np.float32)
 
 
@@ -126,7 +101,6 @@ def build_dataset(file_list, outcomes_dict, static_vars, time_series_vars):
         patient_seq = np.nan_to_num(patient_seq, nan=-1.0)
         X.append(torch.tensor(patient_seq, dtype=torch.float32))
         y.append(outcomes_dict[record_id])
-    
     return torch.stack(X), torch.tensor(y, dtype=torch.float32)
 
 

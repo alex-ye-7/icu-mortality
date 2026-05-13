@@ -6,7 +6,7 @@ import numpy as np
 from tqdm import tqdm
 from pathlib import Path
 from pandas.errors import EmptyDataError
-from config import DEMO_FEATURES, DEMO_NORMALIZERS
+from config import DEMO_FEATURES, NO_NORMALIZE
 
 def create_triplets(file_path, feature_to_id):
     """
@@ -64,50 +64,52 @@ def build_triplet_dataset(file_list, outcomes_dict, static_vars, time_series_var
     return triplets_list, y, feature_to_id
 
 
-def compute_value_stats(triplets_list):
+def compute_value_stats(triplets_list, feature_to_id):
     """
     Compute per-variable mean and std from triplet data (call on training set only).
-    Params: triplets_list: List of tensors, each shape (num_obs, 3)
+    Skips categorical / already-scaled features listed in NO_NORMALIZE - their
+    triplet values pass through normalize_triplet_values unchanged.
+
+    Params:
+        triplets_list: List of tensors, each shape (num_obs, 3)
+        feature_to_id: Mapping from feature name to feature ID
     Returns: Dict mapping feature_id -> (mean, std)
     """
+    skip_ids = {feature_to_id[name] for name in NO_NORMALIZE if name in feature_to_id}
     stats = {}
     all_triplets = torch.cat([t for t in triplets_list if len(t) > 0], dim=0)
     fids = all_triplets[:, 1].unique().int().tolist()
-    for fid in fids: 
+    for fid in fids:
+        if fid in skip_ids: continue
         vals = all_triplets[all_triplets[:, 1] == fid, 2]
         stats[fid] = (vals.mean().item(), vals.std().item() + 1e-08)
     return stats
 
 
-def normalize_demographics(triplets_list, feature_to_id):
+def extract_demographics(triplets_list, feature_to_id):
     """
-    Extract demographic features from triplet data and normalize.
-    
-    Args: triplets_list: List of tensors with shape (num_obs, 3), feature_to_id dictionary 
-    Returns: Normalized demographics (n_samples, D)
+    Extract demographic features from triplet data into a fixed-size static vector.
+
+    Assumes triplets have already been passed through normalize_triplet_values, so
+    continuous demographics (Age, Height, Weight) are z-scored and categorical ones
+    (Gender, ICUType) are still raw. Missing values default to 0 - which equals the
+    train-set mean for z-scored features (implicit mean imputation).
+
+    Args: triplets_list: List of tensors with shape (num_obs, 3), feature_to_id dict
+    Returns: Demographics array (n_samples, D)
     """
     n_samples = len(triplets_list)
     D = len(DEMO_FEATURES)
     demo_array = np.zeros((n_samples, D))
-    
+
     for idx, triplet in enumerate(triplets_list):
         if len(triplet) == 0: continue
-        
-        # Extract all feature values for this patient
         for feature_idx, feature_name in enumerate(DEMO_FEATURES):
             if feature_name not in feature_to_id: continue
-                
             feature_id = feature_to_id[feature_name]
-
             mask = triplet[:, 1] == feature_id
             if mask.any():
-                value = triplet[mask, 2][0].item()  # Get first occurrence
-                
-                # Normalize to [0, 1]
-                min_val, max_val = DEMO_NORMALIZERS[feature_name]
-                normalized = (value - min_val) / (max_val - min_val)
-                normalized = np.clip(normalized, 0, 1)
-                demo_array[idx, feature_idx] = normalized
+                demo_array[idx, feature_idx] = triplet[mask, 2][0].item()
 
     return demo_array
 

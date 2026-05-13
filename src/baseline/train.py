@@ -1,6 +1,6 @@
 # Alexander Ye
 # Training and eval for baseline models
-# Usage: python -m src/baseline/train.py --model lstm --epochs 50
+# Usage: python -m baseline.train --model lstm --epochs 50
 
 import copy
 import random
@@ -11,7 +11,7 @@ import torch.nn as nn
 from torch.utils.data import TensorDataset, DataLoader, random_split
 from baseline.utils import load_processed_data
 from baseline.models import GRUPredictor, LSTMPredictor, TransformerPredictor
-from common.metrics import calc_auroc_auprc
+from common.metrics import calc_auroc_auprc, calc_youdens
 from config import *
 
 

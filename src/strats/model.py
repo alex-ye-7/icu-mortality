@@ -176,5 +176,5 @@ class STraTS(nn.Module):
         ts_demo_embd = torch.cat((ts_embd, demo_embd), dim=-1)
 
         logits = self.binary_head(ts_demo_embd).squeeze(-1)
-        return torch.sigmoid(logits)
+        return logits
     

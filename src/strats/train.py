@@ -8,10 +8,10 @@ import numpy as np
 import torch
 import torch.optim as optim
 from tqdm import tqdm
-from triplet.strats import STraTS
-from triplet.dataset import Dataset, DataLoader
+from strats.model import STraTS
+from strats.dataset import Dataset, DataLoader
+from common.metrics import *
 from config import *
-from shared.evaluate import evaluate_strats
 
 def evaluate_strats(model, dataloader, device):
     model.eval()
@@ -19,10 +19,10 @@ def evaluate_strats(model, dataloader, device):
     with torch.no_grad():
         for batch_test in dataloader:
             batch_test = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch_test.items()}
-            probs = model(values=batch_test['values'], times=batch_test['times'],
+            probs = torch.sigmoid(model(values=batch_test['values'], times=batch_test['times'],
                 vars=batch_test['varis'], obs_mask=batch_test['obs_mask'],
                 demo=batch_test['demo']
-            )
+            ))
             true.append(batch_test['labels'])
             pred.append(probs)
             
@@ -57,7 +57,7 @@ if __name__ == "__main__":
     args = parse_args()
 
     # Split indices first (for normalization)
-    y_train = torch.load(DATA_PROCESSED / 'y_train.pt', weights_only=True)
+    y_train = torch.load(DATA_TRIPLET / 'y_train.pt', weights_only=True)
     indices = np.arange(len(y_train))
     np.random.shuffle(indices)
     split_idx = int(len(indices) * (1 - args.val_split))
@@ -80,7 +80,7 @@ if __name__ == "__main__":
 
     # Setup training 
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
-    criterion = torch.nn.BCELoss()
+    criterion = torch.nn.BCEWithLogitsLoss()
 
     # Training loop
     best_val_auroc = 0.0

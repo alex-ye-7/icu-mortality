@@ -4,26 +4,27 @@
 import torch
 import numpy as np
 from pathlib import Path
-from triplet.utils.io import *
-from triplet.utils.triplets_utils import *
+from strats.utils import *
+from config import DATA_TRIPLET
 
 class Dataset:
     def __init__(self, split='train', stat_indices=None) -> None:
-        data_dir = Path(__file__).parent.parent / 'data' / '_processed'
-        triplets_list, y, feature_to_id = load_triplet_data(str(data_dir), split_name=split)
+        triplets_list, y, feature_to_id = load_triplet_data(DATA_TRIPLET, split_name=split)
 
-        # Extract demographics -> make this better
-        self.demo = normalize_demographics(triplets_list, feature_to_id)
-
-        # Z-score normalize time-series values
-        # Compute stats on train subset only, reuse for test
+        # Z-score normalize first (continuous demographics share the triplet stats path;
+        # categorical features in NO_NORMALIZE pass through unchanged). Compute stats on
+        # train subset only, reuse for test.
         if split == 'train':
             stat_subset = [triplets_list[i] for i in stat_indices] if stat_indices is not None else triplets_list
-            stats = compute_value_stats(stat_subset)
-            save_value_stats(stats, str(data_dir))
+            stats = compute_value_stats(stat_subset, feature_to_id)
+            save_value_stats(stats, DATA_TRIPLET)
         else:
-            stats = load_value_stats(str(data_dir))
+            stats = load_value_stats(DATA_TRIPLET)
         normalize_triplet_values(triplets_list, stats)
+
+        # Extract demographics into a fixed-size static vector AFTER normalization
+        # so Age/Height/Weight come out z-scored and Gender/ICUType stay raw.
+        self.demo = extract_demographics(triplets_list, feature_to_id)
 
         # Convert triplets to separate arrays of times, feature IDs, and values
         self.times, self.values, self.varis  = [], [], []

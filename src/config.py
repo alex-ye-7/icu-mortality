@@ -12,7 +12,7 @@ DATA_TRIPLET = PROJECT_ROOT / "data" / "triplet"
 # Variables extracted from https://physionet.org/content/challenge-2012/1.0.0/
 # Then narrowed down to 33 relevent variables upon data exploration
 STATIC_VARS = [
-    'RecordID',    # Unique integer for each ICU stay
+    # 'RecordID',    # Unique integer for each ICU stay
     'Age',         # Years
     'Gender',      # 0: female, 1: male
     'Height',      # cm
@@ -51,18 +51,13 @@ TIME_SERIES_VARS = [
     'WBC',         # White blood cell count (cells/nL)
 ]
 
-# TODO: maybe shouldn't hardcode
-# Normalization bounds for demographic features
-DEMO_NORMALIZERS = {
-    'Age': (18, 89),           # Min, Max age in training data
-    'Gender': (0, 1),          # Binary: 0=F, 1=M
-    'Height': (140, 210),      # cm
-    'ICUType': (1, 4),         # Categorical: 1-4
-    'Weight': (30, 200),       # kg
-}
-
-# Demographic features to extract (exclude RecordID)
+# Demographic features fed to the model as a static vector (exclude RecordID).
+# Order matters - it defines the column order of the demographics tensor.
 DEMO_FEATURES = ['Age', 'Gender', 'Height', 'ICUType', 'Weight']
+
+# Features that should NOT be z-scored (categorical / already-scaled).
+# Everything else gets per-feature z-score normalization from train-set stats.
+NO_NORMALIZE = {'Gender', 'ICUType', 'MechVent'}
 
 # Training parameters
 BATCH_SIZE = 32
@@ -77,7 +72,7 @@ N_HEAD = 4
 DIM_FF = 128
 
 # Study parameters (first 36 hours)
-STUDY_HOURS = (1, 36)
+STUDY_HOURS = (1, 37)
 
 # Scale up
-N_EXAMPLE = 800
+N_EXAMPLE = 4000
